@@ -1,5 +1,6 @@
 import { prisma } from '../db.js';
 import { getStoreAdapters, type StoreAdapter } from '../shopify/store-adapter.js';
+import type { StoreVariant } from '@prisma/client';
 import { ShopifyError, ShopifyUserError } from '../shopify/client.js';
 
 export interface StoreSyncResult {
@@ -36,15 +37,11 @@ function describeError(err: unknown): string {
 
 async function pushToStore(
   adapter: StoreAdapter,
-  sku: string,
+  mapping: StoreVariant | undefined,
   price: string,
 ): Promise<StoreSyncResult> {
-  const mapping = await prisma.storeVariant.findUnique({
-    where: { storeKey_sku: { storeKey: adapter.key, sku } },
-  });
-
   if (!mapping) {
-    const error = `No variant mapping for "${sku}" in store "${adapter.key}". Run: npm run seed:db`;
+    const error = `No variant mapping for this SKU in store "${adapter.key}". Run: npm run seed:db`;
     return { store: adapter.key, label: adapter.label, status: 'FAILED', error };
   }
 
@@ -94,10 +91,18 @@ export async function updatePrice(sku: string, price: string): Promise<PriceUpda
   const updated = await prisma.sku.update({
     where: { sku },
     data: { price },
+    include: { storeVariants: true },
   });
 
-  const adapters = getStoreAdapters();
-  const results = await Promise.all(adapters.map((adapter) => pushToStore(adapter, sku, price)));
+  const results = await Promise.all(
+    getStoreAdapters().map((adapter) =>
+      pushToStore(
+        adapter,
+        updated.storeVariants.find((v) => v.storeKey === adapter.key),
+        price,
+      ),
+    ),
+  );
 
   return {
     sku: updated.sku,

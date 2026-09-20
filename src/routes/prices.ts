@@ -1,4 +1,4 @@
-import { Router, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { updatePrice, SkuNotFoundError } from '../services/price-sync.js';
 import { getPriceReport } from '../services/price-report.js';
 
@@ -40,33 +40,47 @@ export function validatePrice(raw: unknown): { ok: true; price: string } | { ok:
   return { ok: true, price };
 }
 
+type Handler = (req: Request, res: Response) => Promise<void>;
+
+function route(handler: Handler) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res).catch(next);
+  };
+}
+
 export const pricesRouter = Router();
 
-pricesRouter.get('/prices', async (_req: Request, res: Response) => {
-  res.json(await getPriceReport());
-});
+pricesRouter.get(
+  '/prices',
+  route(async (_req, res) => {
+    res.json(await getPriceReport());
+  }),
+);
 
-pricesRouter.patch('/prices/:sku', async (req: Request, res: Response) => {
-  const sku = req.params.sku?.trim();
-  if (!sku) {
-    res.status(400).json({ error: 'sku_required', detail: 'Path must include a SKU.' });
-    return;
-  }
-
-  const validated = validatePrice((req.body as Record<string, unknown> | undefined)?.price);
-  if (!validated.ok) {
-    res.status(400).json(validated.failure);
-    return;
-  }
-
-  try {
-    const result = await updatePrice(sku, validated.price);
-    res.status(result.summary.failed > 0 ? 207 : 200).json(result);
-  } catch (err) {
-    if (err instanceof SkuNotFoundError) {
-      res.status(404).json({ error: 'sku_not_found', detail: err.message });
+pricesRouter.patch(
+  '/prices/:sku',
+  route(async (req, res) => {
+    const sku = req.params.sku?.trim();
+    if (!sku) {
+      res.status(400).json({ error: 'sku_required', detail: 'Path must include a SKU.' });
       return;
     }
-    throw err;
-  }
-});
+
+    const validated = validatePrice((req.body as Record<string, unknown> | undefined)?.price);
+    if (!validated.ok) {
+      res.status(400).json(validated.failure);
+      return;
+    }
+
+    try {
+      const result = await updatePrice(sku, validated.price);
+      res.status(result.summary.failed > 0 ? 207 : 200).json(result);
+    } catch (err) {
+      if (err instanceof SkuNotFoundError) {
+        res.status(404).json({ error: 'sku_not_found', detail: err.message });
+        return;
+      }
+      throw err;
+    }
+  }),
+);

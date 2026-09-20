@@ -1,7 +1,7 @@
-import { getConfigOrExit, type StoreConfig } from '../config.js';
-import { shopifyGraphQL, assertNoUserErrors, type UserError } from '../shopify/client.js';
+import { getConfigOrExit } from '../config.js';
+import { assertNoUserErrors, type UserError } from '../shopify/client.js';
+import { getStoreAdapters, type StoreAdapter } from '../shopify/store-adapter.js';
 import { CATALOG, type CatalogItem } from '../catalog.js';
-import { fetchVariantsBySku } from '../shopify/variants.js';
 
 const EXISTING_PRODUCTS = `
   query ExistingProducts($query: String!) {
@@ -28,8 +28,8 @@ const CREATE_PRODUCT = `
   }
 `;
 
-const UPDATE_VARIANT = `
-  mutation UpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+const SET_PRICE_AND_SKU = `
+  mutation SetPriceAndSku($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
       productVariants { id sku price }
       userErrors { field message code }
@@ -47,22 +47,17 @@ function handleFor(item: CatalogItem): string {
   return item.sku.toLowerCase();
 }
 
-function buildOrQuery(field: string, values: string[]): string {
-  return values.map((v) => `${field}:${v}`).join(' OR ');
-}
-
-async function findExistingProducts(store: StoreConfig): Promise<Map<string, ProductNode>> {
-  const data = await shopifyGraphQL<{ products: { nodes: ProductNode[] } }>(store, EXISTING_PRODUCTS, {
-    query: buildOrQuery('handle', CATALOG.map(handleFor)),
+async function findProductsByHandle(adapter: StoreAdapter): Promise<Map<string, ProductNode>> {
+  const data = await adapter.query<{ products: { nodes: ProductNode[] } }>(EXISTING_PRODUCTS, {
+    query: CATALOG.map((i) => `handle:${handleFor(i)}`).join(' OR '),
   });
-
   return new Map(data.products.nodes.map((n) => [n.handle, n]));
 }
 
-async function createProduct(store: StoreConfig, item: CatalogItem): Promise<ProductNode> {
-  const data = await shopifyGraphQL<{
+async function createProduct(adapter: StoreAdapter, item: CatalogItem): Promise<ProductNode> {
+  const data = await adapter.query<{
     productCreate: { product: ProductNode | null; userErrors: UserError[] };
-  }>(store, CREATE_PRODUCT, {
+  }>(CREATE_PRODUCT, {
     product: {
       title: item.title,
       handle: handleFor(item),
@@ -71,44 +66,35 @@ async function createProduct(store: StoreConfig, item: CatalogItem): Promise<Pro
     },
   });
 
-  assertNoUserErrors('productCreate', store.key, data.productCreate.userErrors);
+  assertNoUserErrors('productCreate', adapter.key, data.productCreate.userErrors);
   if (!data.productCreate.product) {
-    throw new Error(`productCreate returned no product for ${item.sku} on "${store.key}".`);
+    throw new Error(`productCreate returned no product for ${item.sku} on "${adapter.key}".`);
   }
   return data.productCreate.product;
 }
 
 async function setPriceAndSku(
-  store: StoreConfig,
+  adapter: StoreAdapter,
   productId: string,
   variantId: string,
   item: CatalogItem,
 ): Promise<void> {
-  const data = await shopifyGraphQL<{
-    productVariantsBulkUpdate: {
-      productVariants: Array<{ id: string; sku: string | null; price: string }>;
-      userErrors: UserError[];
-    };
-  }>(store, UPDATE_VARIANT, {
+  const data = await adapter.query<{
+    productVariantsBulkUpdate: { userErrors: UserError[] };
+  }>(SET_PRICE_AND_SKU, {
     productId,
-    variants: [
-      {
-        id: variantId,
-        price: item.price,
-        inventoryItem: { sku: item.sku },
-      },
-    ],
+    variants: [{ id: variantId, price: item.price, inventoryItem: { sku: item.sku } }],
   });
 
-  assertNoUserErrors('productVariantsBulkUpdate', store.key, data.productVariantsBulkUpdate.userErrors);
+  assertNoUserErrors('productVariantsBulkUpdate', adapter.key, data.productVariantsBulkUpdate.userErrors);
 }
 
-async function seedStore(store: StoreConfig): Promise<void> {
-  console.log(`\n${store.label} (${store.domain})`);
+async function seedStore(adapter: StoreAdapter): Promise<void> {
+  console.log(`\n${adapter.label} (${adapter.domain})`);
 
   const [existingBySku, existingByHandle] = await Promise.all([
-    fetchVariantsBySku(store, CATALOG.map((i) => i.sku)),
-    findExistingProducts(store),
+    adapter.fetchVariants(CATALOG.map((i) => i.sku)),
+    findProductsByHandle(adapter),
   ]);
 
   let created = 0;
@@ -124,14 +110,14 @@ async function seedStore(store: StoreConfig): Promise<void> {
     }
 
     const orphan = existingByHandle.get(handleFor(item));
-    const product = orphan ?? (await createProduct(store, item));
+    const product = orphan ?? (await createProduct(adapter, item));
     const variantId = product.variants.nodes[0]?.id;
 
     if (!variantId) {
-      throw new Error(`Product ${product.id} for ${item.sku} on "${store.key}" has no default variant.`);
+      throw new Error(`Product ${product.id} for ${item.sku} on "${adapter.key}" has no default variant.`);
     }
 
-    await setPriceAndSku(store, product.id, variantId, item);
+    await setPriceAndSku(adapter, product.id, variantId, item);
 
     if (orphan) {
       repaired++;
@@ -146,11 +132,12 @@ async function seedStore(store: StoreConfig): Promise<void> {
 }
 
 async function main() {
-  const config = getConfigOrExit();
-  console.log(`Seeding ${CATALOG.length} SKUs into ${config.stores.length} stores.`);
+  getConfigOrExit();
+  const adapters = getStoreAdapters();
+  console.log(`Seeding ${CATALOG.length} SKUs into ${adapters.length} stores.`);
 
-  for (const store of config.stores) {
-    await seedStore(store);
+  for (const adapter of adapters) {
+    await seedStore(adapter);
   }
 
   console.log('\nDone. Next: npm run seed:db');

@@ -1,7 +1,7 @@
 import { getConfigOrExit } from '../config.js';
 import { prisma } from '../db.js';
 import { CATALOG } from '../catalog.js';
-import { fetchVariantsBySku } from '../shopify/variants.js';
+import { getStoreAdapters } from '../shopify/store-adapter.js';
 
 async function main() {
   const config = getConfigOrExit();
@@ -19,9 +19,9 @@ async function main() {
   console.log(`  central prices: ${CATALOG.length} rows (existing prices left as-is)`);
 
   const perStore = await Promise.all(
-    config.stores.map(async (store) => ({
+    getStoreAdapters().map(async (store) => ({
       store,
-      variants: await fetchVariantsBySku(store, skus),
+      variants: await store.fetchVariants(skus),
     })),
   );
 

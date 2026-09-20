@@ -10,9 +10,7 @@
     "start": "node dist/server.js",
     "seed:db": "tsx src/scripts/seed-db.ts",
     "seed:shopify": "tsx src/scripts/seed-shopify.ts",
-    "check:stores": "tsx src/scripts/check-stores.ts",
     "db:migrate": "prisma migrate dev",
-    "db:studio": "prisma studio",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

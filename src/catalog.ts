@@ -16,5 +16,3 @@ export const CATALOG: CatalogItem[] = [
   { sku: 'PS-009', title: 'Suede Desert Boots', price: '219.50' },
   { sku: 'PS-010', title: 'Organic Cotton Tee', price: '39.95' },
 ];
-
-export const CATALOG_BY_SKU = new Map(CATALOG.map((item) => [item.sku, item]));

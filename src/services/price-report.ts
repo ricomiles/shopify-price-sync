@@ -1,7 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
-import { getStoreAdapters } from '../shopify/store-adapter.js';
-import type { StoreVariantInfo } from '../shopify/variants.js';
+import { getStoreAdapters, type StoreVariant } from '../shopify/store-adapter.js';
 
 export type StorePriceState = 'match' | 'mismatch' | 'unmapped' | 'unreachable';
 
@@ -56,12 +55,12 @@ export async function getPriceReport(): Promise<PriceReport> {
   const liveByStore = await Promise.all(
     adapters.map(async (adapter) => {
       try {
-        const live = await adapter.fetchLivePrices(skuIds);
+        const live = await adapter.fetchVariants(skuIds);
         return { adapter, live, error: null as string | null };
       } catch (err) {
         return {
           adapter,
-          live: new Map<string, StoreVariantInfo>(),
+          live: new Map<string, StoreVariant>(),
           error: err instanceof Error ? err.message : String(err),
         };
       }

@@ -2,14 +2,12 @@ import { type StoreConfig } from '../config.js';
 
 interface TokenResponse {
   access_token: string;
-  scope: string;
   expires_in: number;
 }
 
 interface CachedToken {
   token: string;
   expiresAt: number;
-  scope: string;
 }
 
 const EXPIRY_MARGIN_MS = 60_000;
@@ -78,7 +76,6 @@ async function requestToken(store: StoreConfig): Promise<CachedToken> {
 
   return {
     token: body.access_token,
-    scope: body.scope ?? '',
     expiresAt: Date.now() + body.expires_in * 1000 - EXPIRY_MARGIN_MS,
   };
 }
@@ -102,8 +99,4 @@ export async function getAccessToken(store: StoreConfig, force = false): Promise
   } finally {
     inFlight.delete(store.key);
   }
-}
-
-export function getGrantedScopes(storeKey: string): string | null {
-  return cache.get(storeKey)?.scope ?? null;
 }
