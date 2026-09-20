@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Price Sync</title>
+<style>
+  :root {
+    --bg: #fbfbfa;
+    --panel: #ffffff;
+    --border: #e3e3e0;
+    --text: #1f2328;
+    --muted: #6a7178;
+    --accent: #1f6feb;
+    --ok-bg: #e7f5ec; --ok-fg: #1a7f42;
+    --warn-bg: #fdf1e0; --warn-fg: #9a5b09;
+    --err-bg: #fdecec; --err-fg: #b3261e;
+    --idle-bg: #eef0f2; --idle-fg: #5b6169;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 20px 64px;
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 20px; }
+  button {
+    font: inherit; border: 1px solid var(--border); background: var(--panel);
+    padding: 6px 12px; border-radius: 6px; cursor: pointer; color: var(--text);
+  }
+  button:hover:not(:disabled) { border-color: #c9c9c5; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: #1a5fd0; }
+  button.primary:disabled { background: var(--idle-bg); border-color: var(--border); color: var(--muted); opacity: 1; }
+
+  .bar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 14px; min-height: 30px;
+  }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 500;
+  }
+  .pill.ok { background: var(--ok-bg); color: var(--ok-fg); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn-fg); }
+  .pill.err { background: var(--err-bg); color: var(--err-fg); }
+  .pill.idle { background: var(--idle-bg); color: var(--idle-fg); }
+  .spacer { flex: 1; }
+  .flash-bar { margin-top: -6px; }
+  .flash-bar:empty { display: none; }
+
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 10px 14px; text-align: left; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  thead th {
+    background: #f6f6f5; font-weight: 600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em; color: var(--muted);
+    white-space: nowrap; position: sticky; top: 0;
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover { background: #fafafa; }
+  th:nth-child(2), td:nth-child(2) { width: 100%; }
+  th:first-child, td:first-child { white-space: nowrap; }
+  .store-col { border-left: 1px solid var(--border); }
+  .sku { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .title { font-weight: 500; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .edit { display: flex; align-items: center; gap: 6px; }
+  .edit .cur { color: var(--muted); }
+  input[type=text] {
+    font: inherit; font-variant-numeric: tabular-nums; width: 88px;
+    padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: #fff;
+  }
+  input[type=text]:focus { outline: 2px solid rgba(31,111,235,.25); outline-offset: 0; border-color: var(--accent); }
+  input[type=text].bad { border-color: var(--err-fg); }
+
+  .live { display: flex; flex-direction: column; gap: 3px; }
+  .err-note { color: var(--err-fg); font-size: 11px; max-width: 260px; }
+  .muted { color: var(--muted); }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  tr.busy { opacity: .55; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Price Sync</h1>
+    <button id="refresh">Refresh</button>
+  </header>
+  <p class="sub">Central price source. Editing a price writes it here, then pushes to every configured store.</p>
+
+  <div class="bar" id="bar"></div>
+  <div class="bar flash-bar" id="flash"></div>
+
+  <div class="panel">
+    <div class="scroll">
+      <table>
+        <thead id="head"></thead>
+        <tbody id="body"><tr><td class="empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+const PRICE_RE = /^\d{1,8}(\.\d{1,2})?$/;
+const STATE_CLASS = { match: 'ok', mismatch: 'warn', unmapped: 'idle', unreachable: 'err' };
+
+let stores = [];
+
+const el = (tag, props = {}, kids = []) => {
+  const n = Object.assign(document.createElement(tag), props);
+  for (const k of [].concat(kids)) n.append(k);
+  return n;
+};
+const pill = (cls, text) => el('span', { className: `pill ${cls}`, textContent: text });
+
+async function load() {
+  const res = await fetch('/prices');
+  if (!res.ok) throw new Error(`GET /prices failed: ${res.status}`);
+  return res.json();
+}
+
+function renderBar(report) {
+  const bar = document.getElementById('bar');
+  bar.replaceChildren();
+
+  const { mismatched, unreachable, skus } = report.summary;
+  bar.append(
+    mismatched === 0 && unreachable === 0
+      ? pill('ok', `${skus} SKUs in sync`)
+      : pill('warn', `${mismatched} mismatched of ${skus}`)
+  );
+  if (unreachable > 0) bar.append(pill('err', `${unreachable} store unreachable`));
+
+  bar.append(el('span', { className: 'spacer' }));
+  for (const s of report.stores) {
+    bar.append(pill(s.reachable ? 'idle' : 'err', s.label + (s.reachable ? '' : ' — unreachable')));
+  }
+}
+
+function renderHead() {
+  const head = document.getElementById('head');
+  const row = el('tr', {}, [
+    el('th', { textContent: 'SKU' }),
+    el('th', { textContent: 'Product' }),
+    el('th', { textContent: 'Central price' }),
+  ]);
+  for (const s of stores) {
+    row.append(el('th', { className: 'store-col', textContent: s.label }));
+  }
+  head.replaceChildren(row);
+}
+
+function storeCell(view) {
+  const cell = el('td', { className: 'store-col' });
+  const box = el('div', { className: 'live' });
+
+  if (view.status === 'unreachable') {
+    box.append(pill('err', 'unreachable'));
+  } else if (view.status === 'unmapped') {
+    box.append(pill('idle', 'not mapped'));
+  } else {
+    box.append(el('span', { className: 'num', textContent: view.livePrice ?? '—' }));
+    box.append(pill(STATE_CLASS[view.status], view.status === 'match' ? 'in sync' : 'drift'));
+  }
+
+  if (view.syncStatus === 'FAILED' && view.lastError) {
+    box.append(el('div', { className: 'err-note', textContent: view.lastError }));
+  }
+  cell.append(box);
+  return cell;
+}
+
+function renderRow(item) {
+  const tr = el('tr');
+  tr.append(el('td', {}, el('span', { className: 'sku', textContent: item.sku })));
+  tr.append(el('td', {}, el('span', { className: 'title', textContent: item.title })));
+
+  const input = el('input', { type: 'text', value: item.price, 'aria-label': `Price for ${item.sku}` });
+  const save = el('button', { className: 'primary', textContent: 'Save', disabled: true });
+
+  const dirty = () => input.value.trim() !== item.price;
+  const revalidate = () => {
+    const v = input.value.trim();
+    const valid = PRICE_RE.test(v) && Number(v) > 0;
+    input.classList.toggle('bad', v !== '' && !valid);
+    save.disabled = !valid || !dirty();
+  };
+  input.addEventListener('input', revalidate);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !save.disabled) save.click(); });
+  save.addEventListener('click', () => submit(item.sku, input.value.trim(), tr));
+
+  tr.append(el('td', {}, el('div', { className: 'edit' }, [input, save])));
+  for (const s of stores) tr.append(storeCell(item.stores[s.key]));
+  return tr;
+}
+
+function render(report) {
+  stores = report.stores;
+  renderBar(report);
+  renderHead();
+
+  const body = document.getElementById('body');
+  body.replaceChildren(
+    ...(report.prices.length
+      ? report.prices.map(renderRow)
+      : [el('tr', {}, el('td', { className: 'empty', colSpan: 3 + stores.length, textContent: 'No SKUs. Run: npm run seed:db' }))])
+  );
+}
+
+async function submit(sku, price, tr) {
+  tr.classList.add('busy');
+  tr.querySelectorAll('input,button').forEach((n) => (n.disabled = true));
+
+  let message = null;
+
+  try {
+    const res = await fetch(`/prices/${encodeURIComponent(sku)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ price }),
+    });
+    const data = await res.json();
+
+    if (!res.ok && res.status !== 207) {
+      message = ['err', `${sku}: ${data.detail || data.error || res.status}`];
+    } else if (data.summary.failed > 0) {
+      const failed = data.stores.filter((s) => s.status === 'FAILED');
+      message = ['warn', `${sku}: synced ${data.summary.synced}, failed ${data.summary.failed} — ${failed.map((f) => f.label).join(', ')}`];
+    } else {
+      message = ['ok', `${sku} synced to ${data.summary.synced} store${data.summary.synced === 1 ? '' : 's'}`];
+    }
+  } catch (err) {
+    message = ['err', `${sku}: ${err.message}`];
+  } finally {
+    await refresh();
+    if (message) flash(message[0], message[1]);
+  }
+}
+
+let flashTimer;
+function flash(cls, text) {
+  const host = document.getElementById('flash');
+  const node = pill(cls, text);
+  host.replaceChildren(node);
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => node.remove(), 6000);
+}
+
+async function refresh() {
+  const btn = document.getElementById('refresh');
+  btn.disabled = true;
+  try {
+    render(await load());
+  } catch (err) {
+    document.getElementById('body').replaceChildren(
+      el('tr', {}, el('td', { className: 'empty', textContent: err.message }))
+    );
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('refresh').addEventListener('click', refresh);
+refresh();
+</script>
+</body>
+</html>
