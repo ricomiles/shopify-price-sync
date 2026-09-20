@@ -1,0 +1,30 @@
+{
+  "name": "shopify-price-sync",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Centralized price source that fans variant price updates out to multiple Shopify stores.",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "seed:db": "tsx src/scripts/seed-db.ts",
+    "seed:shopify": "tsx src/scripts/seed-shopify.ts",
+    "check:stores": "tsx src/scripts/check-stores.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.10.5",
+    "prisma": "^6.1.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}
