@@ -13,10 +13,10 @@ async function main() {
     await prisma.sku.upsert({
       where: { sku: item.sku },
       create: { sku: item.sku, title: item.title, price: item.price },
-      update: { title: item.title, price: item.price },
+      update: { title: item.title },
     });
   }
-  console.log(`  central prices: ${CATALOG.length} rows`);
+  console.log(`  central prices: ${CATALOG.length} rows (existing prices left as-is)`);
 
   const perStore = await Promise.all(
     config.stores.map(async (store) => ({

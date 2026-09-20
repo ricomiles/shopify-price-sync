@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { updatePrice, SkuNotFoundError } from '../services/price-sync.js';
+import { getPriceReport } from '../services/price-report.js';
 
 const PRICE_PATTERN = /^\d{1,8}(\.\d{1,2})?$/;
 
@@ -40,6 +41,10 @@ export function validatePrice(raw: unknown): { ok: true; price: string } | { ok:
 }
 
 export const pricesRouter = Router();
+
+pricesRouter.get('/prices', async (_req: Request, res: Response) => {
+  res.json(await getPriceReport());
+});
 
 pricesRouter.patch('/prices/:sku', async (req: Request, res: Response) => {
   const sku = req.params.sku?.trim();
