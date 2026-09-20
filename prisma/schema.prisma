@@ -6,3 +6,39 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+model Sku {
+  sku       String   @id
+  title     String
+  price     Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  storeVariants StoreVariant[]
+}
+
+model StoreVariant {
+  id              String     @id @default(cuid())
+  storeKey        String
+  sku             String
+  productGid      String
+  variantGid      String
+  lastSyncedPrice Decimal?   @db.Decimal(10, 2)
+  syncStatus      SyncStatus @default(PENDING)
+  lastError       String?
+  lastAttemptAt   DateTime?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  skuRecord Sku @relation(fields: [sku], references: [sku], onDelete: Cascade)
+
+  @@unique([storeKey, sku])
+  @@index([storeKey])
+}

@@ -1,6 +1,5 @@
 import { type StoreConfig } from '../config.js';
 
-
 interface TokenResponse {
   access_token: string;
   scope: string;
@@ -84,9 +83,6 @@ async function requestToken(store: StoreConfig): Promise<CachedToken> {
   };
 }
 
-/**
- * @param force 
- */
 export async function getAccessToken(store: StoreConfig, force = false): Promise<string> {
   if (!force) {
     const cached = cache.get(store.key);

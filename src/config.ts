@@ -19,6 +19,8 @@ export interface AppConfig {
   stores: StoreConfig[];
 }
 
+const MAX_STORE_SCAN = 20;
+
 function required(name: string): string {
   const value = process.env[name];
   if (!value || value.trim() === '') {
@@ -27,8 +29,6 @@ function required(name: string): string {
   return value.trim();
 }
 
-const MAX_STORE_SCAN = 20;
-s
 function loadStores(): StoreConfig[] {
   const stores: StoreConfig[] = [];
 
@@ -52,7 +52,6 @@ function loadStores(): StoreConfig[] {
           `A custom storefront domain will not authenticate against the Admin API.`,
       );
     }
-s
     if (clientId.includes('replace_me') || clientSecret.includes('replace_me')) {
       throw new ConfigError(
         `STORE_${i}_CLIENT_ID / STORE_${i}_CLIENT_SECRET are still the .env.example placeholders. ` +
